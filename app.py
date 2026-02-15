@@ -167,6 +167,80 @@ def extract_code(msg, text):
     
     return "Unknown"
 
+# --- دالة استخراج اسم السيرفر من النص ---
+def extract_server_name(text):
+    """
+    استخراج اسم السيرفر من النص بذكاء
+    """
+    # تقسيم النص إلى سطور
+    lines = text.split('\n')
+    first_line = lines[0].strip() if lines else ""
+    
+    # البحث عن اسم السيرفر في أول سطر
+    server_name = "Unknown"
+    
+    # النمط: شيء مثل #YE WS أو #YE WS something
+    if "#" in first_line:
+        parts = first_line.split("#")
+        if len(parts) > 1:
+            after_hash = parts[1].strip()
+            # تقسيم ما بعد الـ #
+            hash_parts = after_hash.split()
+            
+            if len(hash_parts) >= 2:
+                # إذا كان هناك جزئين أو أكثر، الثاني غالباً هو السيرفر
+                # مثال: #YE WS -> hash_parts = ["YE", "WS"] -> server = "WS"
+                # مثال: #YE WS TEXT -> hash_parts = ["YE", "WS", "TEXT"] -> server = "WS"
+                server_name = hash_parts[1]
+            elif len(hash_parts) == 1:
+                # إذا كان جزء واحد فقط، تحقق إذا كان ليس رمز دولة
+                # مثال: #WS -> هذا قد يكون السيرفر مباشرة
+                potential = hash_parts[0]
+                # إذا كان مكون من حرفين فقط، قد يكون دولة وليس سيرفر
+                if len(potential) == 2 and potential.isalpha() and potential.isupper():
+                    # هذا غالباً رمز دولة، ابحث في باقي النص
+                    server_name = find_server_in_rest(text)
+                else:
+                    server_name = potential
+    
+    # إذا لم نجد في أول سطر، ابحث في باقي النص
+    if server_name == "Unknown":
+        server_name = find_server_in_rest(text)
+    
+    return server_name
+
+def find_server_in_rest(text):
+    """
+    البحث عن اسم السيرفر في بقية النص
+    """
+    # قائمة بأسماء السيرفرات المعروفة (يمكن إضافة المزيد)
+    known_servers = ["WS", "VK", "FB", "IG", "TW", "TB", "LI", "SC", "WA", "TG", "AP", "GP"]
+    
+    # البحث في النص كله
+    for server in known_servers:
+        if re.search(rf'\b{server}\b', text):
+            return server
+    
+    # البحث عن أي كلمة كبيرة مكونة من حرفين أو أكثر
+    # نتجنب الكلمات التي هي أرقام فقط
+    words = re.findall(r'\b[A-Z]{2,}\b', text)
+    for word in words:
+        # تجاهل الكلمات المكونة من حرفين فقط إذا كانت في قائمة رموز الدول
+        if len(word) == 2 and word in ["YE", "BO", "US", "UK", "SA", "AE", "EG", "IQ", "SY", "JO", "PS", "LB"]:
+            continue
+        # إذا كانت الكلمة كبيرة وأطول من حرفين، أو موجودة في القائمة
+        if len(word) > 2 or word in known_servers:
+            return word
+    
+    # البحث عن أي مجموعة من الحروف والأرقام
+    alnum_patterns = re.findall(r'\b[A-Z0-9]{3,}\b', text)
+    for pattern in alnum_patterns:
+        # تجاهل إذا كان رقماً فقط
+        if not pattern.isdigit():
+            return pattern
+    
+    return "Unknown"
+
 # --- Main Telethon client ---
 async def main():
     # شغّل listener البوت أولاً
@@ -195,17 +269,25 @@ async def main():
 
         text = msg.message.strip()
 
-        # --- تنظيف النص ---
+        # --- تنظيف النص واستخراج البيانات ---
         first_line = text.splitlines()[0].strip() if text else ""
-        country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
-
-        # اسم السيرفر بدون #
-        server_name = "Unknown"
+        
+        # استخراج الدولة
+        country_code = "Unknown"
         if "#" in first_line:
-            server_name = first_line.split("#")[1].split()[0].strip()
+            # استخراج الكود بعد # (مثل YE من #YE)
+            country_part = first_line.split("#")[1].strip()
+            country_code = country_part.split()[0].strip() if country_part else "Unknown"
+        else:
+            # إذا لم يكن هناك #، خذ أول كلمة
+            country_code = first_line.split()[0].strip() if first_line else "Unknown"
+            # تنظيف رمز العلم إذا وجد
+            country_code = re.sub(r'[^\w]', '', country_code)
+
+        # استخراج اسم السيرفر باستخدام الدالة الجديدة
+        server_name = extract_server_name(text)
 
         # استخراج الرقم مع إمكانية التحكم بعدد الأرقام المعروضة
-        # استخدام DIGITS_TO_SHOW من الإعدادات العامة
         display_number = extract_phone_number(text, DIGITS_TO_SHOW)
 
         # استخراج الكود
@@ -215,7 +297,7 @@ async def main():
         final_text = (
             "📩 *NEW MESSAGE*\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            f"🌍 *Country:* `{country_only}`\n\n"
+            f"🌍 *Country:* `{country_code}`\n\n"
             f"📱 *Number:*.... `{display_number}`\n\n"
             f"🔐 *Code:* `{code}`\n\n"
             f"🖥️ *Server:* `{server_name}`\n\n"
@@ -224,7 +306,7 @@ async def main():
         )
 
         asyncio.create_task(send_and_delete(final_text))
-        logger.info(f"تم إرسال رسالة جديدة: {country_only} - {display_number}")
+        logger.info(f"تم إرسال رسالة جديدة: الدولة {country_code} - السيرفر {server_name} - الرقم {display_number}")
 
     logger.info("🟢 Running: capture ALL messages + clean format + auto delete (10 minutes) + /start handler")
     logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
