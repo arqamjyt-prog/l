@@ -6,11 +6,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# نسخ الملفات
+# نسخ جميع الملفات
 COPY . .
 
-# التأكد من وجود الجلسة
+# التأكد من وجود ملف الجلسة
 RUN ls -la
 
-# تشغيل البوت مباشرة
+# تشغيل البوت مباشرة (بدون gunicorn)
 CMD ["python", "app.py"]
