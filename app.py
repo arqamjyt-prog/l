@@ -10,11 +10,6 @@ import time
 from telethon import TelegramClient, events
 from flask import Flask
 from threading import Thread
-import logging
-
-# إعداد التسجيل للأخطاء
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # --- Telethon API ---
 api_id = 33981047
@@ -65,7 +60,6 @@ async def send_and_delete(text):
         ) as resp:
             data = await resp.json()
             if not data.get("ok"):
-                logger.error(f"Send failed: {data}")
                 return
             message_id = data["result"]["message_id"]
 
@@ -105,8 +99,7 @@ async def handle_start_command():
                                 SEND_URL,
                                 data={"chat_id": chat_id, "text": "Hi\n@sms_free2bot"}
                             )
-            except Exception as e:
-                logger.error(f"Error in start command handler: {e}")
+            except:
                 await asyncio.sleep(1)
 
 # --- دالة استخراج الرقم مع خيارات عرض مرنة ---
@@ -146,98 +139,27 @@ def extract_phone_number(text, digits_to_show=6):
 
 # --- دالة استخراج الكود من الأزرار أو النص ---
 def extract_code(msg, text):
-    # البحث في الأزرار أولاً
-    if msg.reply_markup:
-        for row in msg.reply_markup.rows:
-            for b in row.buttons:
-                if hasattr(b, "text") and b.text.strip().isdigit():
-                    return b.text.strip()
-    
-    # إذا لم نجد في الأزرار، ابحث في النص
-    code_patterns = [
-        r'Code:?\s*(\d+)',     # Code: 12345
-        r'كود:?\s*(\d+)',       # كود: 12345
-        r'\b(\d{4,6})\b'        # أي 4-6 أرقام منفصلة
-    ]
-    
-    for pattern in code_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    
-    return "Unknown"
-
-# --- دالة استخراج اسم السيرفر من النص ---
-def extract_server_name(text):
-    """
-    استخراج اسم السيرفر من النص بذكاء
-    """
-    # تقسيم النص إلى سطور
-    lines = text.split('\n')
-    first_line = lines[0].strip() if lines else ""
-    
-    # البحث عن اسم السيرفر في أول سطر
-    server_name = "Unknown"
-    
-    # النمط: شيء مثل #YE WS أو #YE WS something
-    if "#" in first_line:
-        parts = first_line.split("#")
-        if len(parts) > 1:
-            after_hash = parts[1].strip()
-            # تقسيم ما بعد الـ #
-            hash_parts = after_hash.split()
-            
-            if len(hash_parts) >= 2:
-                # إذا كان هناك جزئين أو أكثر، الثاني غالباً هو السيرفر
-                # مثال: #YE WS -> hash_parts = ["YE", "WS"] -> server = "WS"
-                # مثال: #YE WS TEXT -> hash_parts = ["YE", "WS", "TEXT"] -> server = "WS"
-                server_name = hash_parts[1]
-            elif len(hash_parts) == 1:
-                # إذا كان جزء واحد فقط، تحقق إذا كان ليس رمز دولة
-                # مثال: #WS -> هذا قد يكون السيرفر مباشرة
-                potential = hash_parts[0]
-                # إذا كان مكون من حرفين فقط، قد يكون دولة وليس سيرفر
-                if len(potential) == 2 and potential.isalpha() and potential.isupper():
-                    # هذا غالباً رمز دولة، ابحث في باقي النص
-                    server_name = find_server_in_rest(text)
-                else:
-                    server_name = potential
-    
-    # إذا لم نجد في أول سطر، ابحث في باقي النص
-    if server_name == "Unknown":
-        server_name = find_server_in_rest(text)
-    
-    return server_name
-
-def find_server_in_rest(text):
-    """
-    البحث عن اسم السيرفر في بقية النص
-    """
-    # قائمة بأسماء السيرفرات المعروفة (يمكن إضافة المزيد)
-    known_servers = ["WS", "VK", "FB", "IG", "TW", "TB", "LI", "SC", "WA", "TG", "AP", "GP"]
-    
-    # البحث في النص كله
-    for server in known_servers:
-        if re.search(rf'\b{server}\b', text):
-            return server
-    
-    # البحث عن أي كلمة كبيرة مكونة من حرفين أو أكثر
-    # نتجنب الكلمات التي هي أرقام فقط
-    words = re.findall(r'\b[A-Z]{2,}\b', text)
-    for word in words:
-        # تجاهل الكلمات المكونة من حرفين فقط إذا كانت في قائمة رموز الدول
-        if len(word) == 2 and word in ["YE", "BO", "US", "UK", "SA", "AE", "EG", "IQ", "SY", "JO", "PS", "LB"]:
-            continue
-        # إذا كانت الكلمة كبيرة وأطول من حرفين، أو موجودة في القائمة
-        if len(word) > 2 or word in known_servers:
-            return word
-    
-    # البحث عن أي مجموعة من الحروف والأرقام
-    alnum_patterns = re.findall(r'\b[A-Z0-9]{3,}\b', text)
-    for pattern in alnum_patterns:
-        # تجاهل إذا كان رقماً فقط
-        if not pattern.isdigit():
-            return pattern
+    try:
+        # البحث في الأزرار أولاً
+        if msg.reply_markup:
+            for row in msg.reply_markup.rows:
+                for b in row.buttons:
+                    if hasattr(b, "text") and b.text.strip().isdigit():
+                        return b.text.strip()
+        
+        # إذا لم نجد في الأزرار، ابحث في النص
+        code_patterns = [
+            r'Code:?\s*(\d+)',     # Code: 12345
+            r'كود:?\s*(\d+)',       # كود: 12345
+            r'\b(\d{4,6})\b'        # أي 4-6 أرقام منفصلة
+        ]
+        
+        for pattern in code_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+    except:
+        pass
     
     return "Unknown"
 
@@ -247,82 +169,69 @@ async def main():
     asyncio.create_task(handle_start_command())
 
     # استخدام الجلسة الموجودة بدون إنشاء جديدة
-    # Telethon سيبحث تلقائياً عن ملف session.session في نفس المجلد
     client = TelegramClient(SESSION_NAME, api_id, api_hash)
     
     try:
-        # محاولة بدء الجلسة الموجودة
         await client.start()
-        logger.info("تم استخدام الجلسة الموجودة بنجاح")
-    except Exception as e:
-        logger.error(f"فشل في استخدام الجلسة الموجودة: {e}")
-        logger.info("تأكد من وجود ملف session.session في نفس المجلد")
-        raise e
+    except:
+        return
     
-    source = await client.get_entity(SOURCE_GROUP)
+    try:
+        source = await client.get_entity(SOURCE_GROUP)
+    except:
+        return
 
     @client.on(events.NewMessage(chats=source))
     async def handler(event):
-        msg = event.message
-        if not msg.message:
-            return
+        try:
+            msg = event.message
+            if not msg.message:
+                return
 
-        text = msg.message.strip()
+            text = msg.message.strip()
 
-        # --- تنظيف النص واستخراج البيانات ---
-        first_line = text.splitlines()[0].strip() if text else ""
-        
-        # استخراج الدولة
-        country_code = "Unknown"
-        if "#" in first_line:
-            # استخراج الكود بعد # (مثل YE من #YE)
-            country_part = first_line.split("#")[1].strip()
-            country_code = country_part.split()[0].strip() if country_part else "Unknown"
-        else:
-            # إذا لم يكن هناك #، خذ أول كلمة
-            country_code = first_line.split()[0].strip() if first_line else "Unknown"
-            # تنظيف رمز العلم إذا وجد
-            country_code = re.sub(r'[^\w]', '', country_code)
+            # --- تنظيف النص تماماً كما كان في الكود الأصلي ---
+            first_line = text.splitlines()[0].strip() if text else ""
+            country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
 
-        # استخراج اسم السيرفر باستخدام الدالة الجديدة
-        server_name = extract_server_name(text)
+            # اسم السيرفر بدون # - بالضبط كما كان في الكود الأصلي
+            server_name = "Unknown"
+            if "#" in first_line:
+                server_name = first_line.split("#")[1].split()[0].strip()
 
-        # استخراج الرقم مع إمكانية التحكم بعدد الأرقام المعروضة
-        display_number = extract_phone_number(text, DIGITS_TO_SHOW)
+            # استخراج الرقم
+            display_number = extract_phone_number(text, DIGITS_TO_SHOW)
 
-        # استخراج الكود
-        code = extract_code(msg, text)
+            # استخراج الكود
+            code = extract_code(msg, text)
 
-        # --- تنسيق الرسالة ---
-        final_text = (
-            "📩 *NEW MESSAGE*\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🌍 *Country:* `{country_code}`\n\n"
-            f"📱 *Number:*.... `{display_number}`\n\n"
-            f"🔐 *Code:* `{code}`\n\n"
-            f"🖥️ *Server:* `{server_name}`\n\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _This message will be deleted automatically after 10 minutes._"
-        )
+            # --- تنسيق الرسالة تماماً كما كان ---
+            final_text = (
+                "📩 *NEW MESSAGE*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🌍 *Country:* `{country_only}`\n\n"
+                f"📱 *Number:*.... `{display_number}`\n\n"
+                f"🔐 *Code:* `{code}`\n\n"
+                f"🖥️ *Server:* `{server_name}`\n\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⏳ _This message will be deleted automatically after 10 minutes._"
+            )
 
-        asyncio.create_task(send_and_delete(final_text))
-        logger.info(f"تم إرسال رسالة جديدة: الدولة {country_code} - السيرفر {server_name} - الرقم {display_number}")
+            asyncio.create_task(send_and_delete(final_text))
+        except:
+            pass  # تجاهل الأخطاء بصمت
 
-    logger.info("🟢 Running: capture ALL messages + clean format + auto delete (10 minutes) + /start handler")
-    logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
     await client.run_until_disconnected()
 
-# --- دالة لتشغيل البوت في خيط منفصل مع حلقة أحداث خاصة ---
+# --- دالة لتشغيل البوت في خيط منفصل (لحل مشكلة gunicorn فقط) ---
 def run_bot_in_thread():
-    """تشغيل البوت في خيط مع حلقة أحداث خاصة"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     while True:
         try:
             loop.run_until_complete(main())
-        except Exception as e:
-            logger.error(f"حدث خطأ في البوت: {e}")
+        except:
             time.sleep(10)
             continue
         time.sleep(5)
@@ -330,16 +239,14 @@ def run_bot_in_thread():
 # --- متغير لتتبع حالة البوت ---
 bot_started = False
 
-# --- نقطة الدخول الرئيسية - متوافقة مع gunicorn ---
+# --- نقطة الدخول الرئيسية - متوافقة مع gunicorn (الإضافة الوحيدة لحل المشكلة) ---
 if __name__ != "__main__":
-    # هذا الجزء يعمل عندما يستخدم gunicorn
     if not bot_started:
         bot_thread = Thread(target=run_bot_in_thread, daemon=True)
         bot_thread.start()
         bot_started = True
-        logger.info("✅ تم تشغيل البوت في الخلفية مع gunicorn")
 
-# --- Start ---
+# --- Start (نفس الكود الأصلي تماماً) ---
 if __name__ == "__main__":
     # تشغيل Flask في خيط منفصل
     flask_thread = Thread(target=run_flask)
