@@ -8,7 +8,6 @@ import re
 import threading
 import time
 from telethon import TelegramClient, events
-from telethon.tl.types import MessageService
 from flask import Flask
 from threading import Thread
 
@@ -174,36 +173,19 @@ async def main():
     async def handler(event):
         try:
             msg = event.message
-            
-            # التحقق من أن الرسالة هي رسالة خدمة (إشعار نظام)
-            if isinstance(msg, MessageService):
-                # حذف رسائل الخدمة فوراً مثل "انضم" و "غادر"
-                try:
-                    await client.delete_messages(source, [msg.id])
-                
-                except Exception as e:
-                
-                return  # عدم معالجة رسائل الخدمة
-            
-            # معالجة الرسائل النصية العادية فقط
             if not msg.message:
                 return
 
             text = msg.message.strip()
 
-            # --- استخراج البيانات بالطريقة الصحيحة ---
             first_line = text.splitlines()[0].strip() if text else ""
-            
-            # استخراج العلم ورمز الدولة من أول السطر (مثال: "🇾🇪 #YE")
             country_with_flag = first_line.split()[0].strip() if first_line else "Unknown"
-            
-            # استخراج رمز الدولة (YE, BO, etc)
+
             country_code = "Unknown"
             if "#" in first_line:
                 country_part = first_line.split("#")[1].strip()
                 country_code = country_part.split()[0].strip() if country_part else "Unknown"
-            
-            # استخراج اسم السيرفر (WS, VK, etc)
+
             server_name = "Unknown"
             if "#" in first_line:
                 parts = first_line.split("#")
@@ -216,13 +198,9 @@ async def main():
                         if len(potential) == 2 and potential not in ["YE", "BO", "US", "UK", "SA", "AE"]:
                             server_name = potential
 
-            # استخراج الرقم
             display_number = extract_phone_number(text, DIGITS_TO_SHOW)
-
-            # استخراج الكود
             code = extract_code(msg, text)
 
-            # --- تنسيق الرسالة بالشكل المطلوب ---
             final_text = (
                 "📩 *NEW MESSAGE*\n"
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -235,12 +213,27 @@ async def main():
             )
 
             asyncio.create_task(send_and_delete(final_text))
-            
-            # (اختياري) حذف الرسالة الأصلية من المجموعة المصدر بعد معالجتها
-            # await client.delete_messages(source, [msg.id])
-            
-        except Exception as e:
-    
+        except:
+            pass
+
+    # --- [إضافة فقط] حذف إشعارات الانضمام والمغادرة فور ظهورها ---
+    @client.on(events.ChatAction(chats=TARGET_CHAT_ID))
+    async def delete_join_leave(event):
+        try:
+            if (
+                event.user_joined
+                or event.user_left
+                or event.user_added
+                or event.user_kicked
+            ):
+                if event.action_message:
+                    await client.delete_messages(
+                        event.chat_id,
+                        event.action_message.id
+                    )
+        except:
+            pass
+    # --- نهاية الإضافة ---
 
     await client.run_until_disconnected()
 
@@ -252,8 +245,7 @@ def run_bot_in_thread():
     while True:
         try:
             loop.run_until_complete(main())
-        except Exception as e:
-            
+        except:
             time.sleep(10)
             continue
         time.sleep(5)
