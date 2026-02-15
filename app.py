@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import asyncio
 import aiohttp
 import re
@@ -10,6 +9,7 @@ import threading
 import time
 from telethon import TelegramClient, events
 from flask import Flask
+from threading import Thread
 import logging
 
 # إعداد التسجيل للأخطاء
@@ -38,20 +38,6 @@ DIGITS_TO_SHOW = 6
 PORT = int(os.environ.get('PORT', 5000))
 SESSION_NAME = "session"  # اسم ملف الجلسة الموجود (session.session)
 
-# --- تحديد المسار الكامل للجلسة ---
-SESSION_DIR = os.path.dirname(os.path.abspath(__file__))
-SESSION_PATH = os.path.join(SESSION_DIR, SESSION_NAME)
-logger.info(f"مسار الجلسة: {SESSION_PATH}")
-
-# --- التحقق من وجود الجلسة ---
-session_file = f"{SESSION_PATH}.session"
-if os.path.exists(session_file):
-    logger.info(f"✅ تم العثور على ملف الجلسة: {session_file}")
-else:
-    logger.error(f"❌ لم يتم العثور على ملف الجلسة: {session_file}")
-    files = os.listdir(SESSION_DIR)
-    logger.info(f"الملفات الموجودة: {files}")
-
 # --- إعداد Flask للتأكد أن Render يعرف أن الخدمة تعمل ---
 app = Flask(__name__)
 
@@ -64,41 +50,35 @@ def health():
     return "OK", 200
 
 def run_flask():
-    """تشغيل Flask في خيط منفصل"""
-    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=PORT)
 
 # --- إرسال وحذف بعد 10 دقائق ---
 async def send_and_delete(text):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                SEND_URL,
-                data={
-                    "chat_id": TARGET_CHAT_ID,
-                    "text": text,
-                    "parse_mode": "Markdown"
-                }
-            ) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    logger.error(f"Send failed: {data}")
-                    return
-                message_id = data["result"]["message_id"]
-                logger.info(f"تم إرسال الرسالة بنجاح: {message_id}")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            SEND_URL,
+            data={
+                "chat_id": TARGET_CHAT_ID,
+                "text": text,
+                "parse_mode": "Markdown"
+            }
+        ) as resp:
+            data = await resp.json()
+            if not data.get("ok"):
+                logger.error(f"Send failed: {data}")
+                return
+            message_id = data["result"]["message_id"]
 
-        await asyncio.sleep(600)  # 10 دقائق
+    await asyncio.sleep(600)  # 10 دقائق
 
-        async with aiohttp.ClientSession() as session:
-            await session.post(
-                DELETE_URL,
-                data={
-                    "chat_id": TARGET_CHAT_ID,
-                    "message_id": message_id
-                }
-            )
-        logger.info(f"تم حذف الرسالة: {message_id}")
-    except Exception as e:
-        logger.error(f"خطأ في send_and_delete: {e}")
+    async with aiohttp.ClientSession() as session:
+        await session.post(
+            DELETE_URL,
+            data={
+                "chat_id": TARGET_CHAT_ID,
+                "message_id": message_id
+            }
+        )
 
 # --- الاستماع لأوامر البوت (/start) ---
 async def handle_start_command():
@@ -125,7 +105,6 @@ async def handle_start_command():
                                 SEND_URL,
                                 data={"chat_id": chat_id, "text": "Hi\n@sms_free2bot"}
                             )
-                            logger.info(f"تم الرد على /start من المستخدم {chat_id}")
             except Exception as e:
                 logger.error(f"Error in start command handler: {e}")
                 await asyncio.sleep(1)
@@ -188,25 +167,25 @@ def extract_code(msg, text):
     
     return "Unknown"
 
-# --- وظيفة تشغيل البوت الرئيسية ---
+# --- Main Telethon client ---
 async def main():
     # شغّل listener البوت أولاً
     asyncio.create_task(handle_start_command())
 
     # استخدام الجلسة الموجودة بدون إنشاء جديدة
-    client = TelegramClient(SESSION_PATH, api_id, api_hash)
+    # Telethon سيبحث تلقائياً عن ملف session.session في نفس المجلد
+    client = TelegramClient(SESSION_NAME, api_id, api_hash)
     
     try:
         # محاولة بدء الجلسة الموجودة
         await client.start()
-        me = await client.get_me()
-        logger.info(f"✅ تم تسجيل الدخول بنجاح كـ: {me.first_name}")
+        logger.info("تم استخدام الجلسة الموجودة بنجاح")
     except Exception as e:
         logger.error(f"فشل في استخدام الجلسة الموجودة: {e}")
+        logger.info("تأكد من وجود ملف session.session في نفس المجلد")
         raise e
     
     source = await client.get_entity(SOURCE_GROUP)
-    logger.info(f"✅ تم الاتصال بالمجموعة المصدر: {SOURCE_GROUP}")
 
     @client.on(events.NewMessage(chats=source))
     async def handler(event):
@@ -215,7 +194,6 @@ async def main():
             return
 
         text = msg.message.strip()
-        logger.info(f"📩 تم استلام رسالة جديدة من المجموعة")
 
         # --- تنظيف النص ---
         first_line = text.splitlines()[0].strip() if text else ""
@@ -224,13 +202,10 @@ async def main():
         # اسم السيرفر بدون #
         server_name = "Unknown"
         if "#" in first_line:
-            parts = first_line.split("#")
-            if len(parts) > 1:
-                server_parts = parts[1].split()
-                if server_parts:
-                    server_name = server_parts[0].strip()
+            server_name = first_line.split("#")[1].split()[0].strip()
 
         # استخراج الرقم مع إمكانية التحكم بعدد الأرقام المعروضة
+        # استخدام DIGITS_TO_SHOW من الإعدادات العامة
         display_number = extract_phone_number(text, DIGITS_TO_SHOW)
 
         # استخراج الكود
@@ -248,14 +223,14 @@ async def main():
             "⏳ _This message will be deleted automatically after 10 minutes._"
         )
 
-        logger.info(f"معالجة الرسالة: {country_only} - {display_number}")
         asyncio.create_task(send_and_delete(final_text))
+        logger.info(f"تم إرسال رسالة جديدة: {country_only} - {display_number}")
 
-    logger.info("🟢 البوت يعمل بنجاح على Render")
-    logger.info(f"📱 عرض آخر {DIGITS_TO_SHOW} أرقام من رقم الهاتف")
+    logger.info("🟢 Running: capture ALL messages + clean format + auto delete (10 minutes) + /start handler")
+    logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
     await client.run_until_disconnected()
 
-# --- تشغيل البوت في خيط منفصل مع حلقة أحداث خاصة ---
+# --- دالة لتشغيل البوت في خيط منفصل مع حلقة أحداث خاصة ---
 def run_bot_in_thread():
     """تشغيل البوت في خيط مع حلقة أحداث خاصة"""
     loop = asyncio.new_event_loop()
@@ -266,39 +241,28 @@ def run_bot_in_thread():
             loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"حدث خطأ في البوت: {e}")
-            time.sleep(10)  # انتظر 10 ثواني قبل إعادة التشغيل
+            time.sleep(10)
             continue
-        # إذا انتهى البوت بشكل طبيعي، انتظر قليلاً وأعد التشغيل
-        logger.info("إعادة تشغيل البوت بعد 5 ثواني...")
         time.sleep(5)
 
-# --- هذا الجزء مهم جداً للتعامل مع gunicorn ---
-# متغير عام لتتبع حالة البوت
-bot_thread_started = False
-
-# دالة لبدء البوت في الخلفية (تسمى مرة واحدة فقط)
-def start_bot_background():
-    global bot_thread_started
-    if not bot_thread_started:
-        bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
-        bot_thread.start()
-        bot_thread_started = True
-        logger.info("🚀 تم بدء تشغيل البوت في الخلفية")
-    else:
-        logger.info("البوت يعمل بالفعل في الخلفية")
+# --- متغير لتتبع حالة البوت ---
+bot_started = False
 
 # --- نقطة الدخول الرئيسية - متوافقة مع gunicorn ---
 if __name__ != "__main__":
-    # هذا الجزء يعمل عندما يستخدم gunicorn (في Render)
-    logger.info("بدء تشغيل التطبيق مع gunicorn...")
-    start_bot_background()
+    # هذا الجزء يعمل عندما يستخدم gunicorn
+    if not bot_started:
+        bot_thread = Thread(target=run_bot_in_thread, daemon=True)
+        bot_thread.start()
+        bot_started = True
+        logger.info("✅ تم تشغيل البوت في الخلفية مع gunicorn")
 
-# --- نقطة الدخول العادية - عند التشغيل المباشر ---
+# --- Start ---
 if __name__ == "__main__":
     # تشغيل Flask في خيط منفصل
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
     flask_thread.start()
-    logger.info(f"🚀 Flask server بدأ على المنفذ {PORT}")
     
     # تشغيل البوت
     run_bot_in_thread()
