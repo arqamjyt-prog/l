@@ -1,4 +1,4 @@
-here#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import asyncio
@@ -156,7 +156,7 @@ def extract_code(msg, text):
 # --- تشغيل خادم Flask في thread منفصل ---
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 # --- Main Telethon client ---
 async def main():
