@@ -49,7 +49,6 @@ if os.path.exists(session_file):
     logger.info(f"✅ تم العثور على ملف الجلسة: {session_file}")
 else:
     logger.error(f"❌ لم يتم العثور على ملف الجلسة: {session_file}")
-    # عرض الملفات الموجودة للمساعدة في التصحيح
     files = os.listdir(SESSION_DIR)
     logger.info(f"الملفات الموجودة: {files}")
 
@@ -189,129 +188,117 @@ def extract_code(msg, text):
     
     return "Unknown"
 
-# --- وظيفة تشغيل البوت في حلقة منفصلة ---
-def run_bot_sync():
-    """تشغيل البوت في حلقة متزامنة مناسبة للخيوط"""
+# --- وظيفة تشغيل البوت الرئيسية ---
+async def main():
+    # شغّل listener البوت أولاً
+    asyncio.create_task(handle_start_command())
+
+    # استخدام الجلسة الموجودة بدون إنشاء جديدة
+    client = TelegramClient(SESSION_PATH, api_id, api_hash)
+    
+    try:
+        # محاولة بدء الجلسة الموجودة
+        await client.start()
+        me = await client.get_me()
+        logger.info(f"✅ تم تسجيل الدخول بنجاح كـ: {me.first_name}")
+    except Exception as e:
+        logger.error(f"فشل في استخدام الجلسة الموجودة: {e}")
+        raise e
+    
+    source = await client.get_entity(SOURCE_GROUP)
+    logger.info(f"✅ تم الاتصال بالمجموعة المصدر: {SOURCE_GROUP}")
+
+    @client.on(events.NewMessage(chats=source))
+    async def handler(event):
+        msg = event.message
+        if not msg.message:
+            return
+
+        text = msg.message.strip()
+        logger.info(f"📩 تم استلام رسالة جديدة من المجموعة")
+
+        # --- تنظيف النص ---
+        first_line = text.splitlines()[0].strip() if text else ""
+        country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
+
+        # اسم السيرفر بدون #
+        server_name = "Unknown"
+        if "#" in first_line:
+            parts = first_line.split("#")
+            if len(parts) > 1:
+                server_parts = parts[1].split()
+                if server_parts:
+                    server_name = server_parts[0].strip()
+
+        # استخراج الرقم مع إمكانية التحكم بعدد الأرقام المعروضة
+        display_number = extract_phone_number(text, DIGITS_TO_SHOW)
+
+        # استخراج الكود
+        code = extract_code(msg, text)
+
+        # --- تنسيق الرسالة ---
+        final_text = (
+            "📩 *NEW MESSAGE*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"🌍 *Country:* `{country_only}`\n\n"
+            f"📱 *Number:*.... `{display_number}`\n\n"
+            f"🔐 *Code:* `{code}`\n\n"
+            f"🖥️ *Server:* `{server_name}`\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⏳ _This message will be deleted automatically after 10 minutes._"
+        )
+
+        logger.info(f"معالجة الرسالة: {country_only} - {display_number}")
+        asyncio.create_task(send_and_delete(final_text))
+
+    logger.info("🟢 البوت يعمل بنجاح على Render")
+    logger.info(f"📱 عرض آخر {DIGITS_TO_SHOW} أرقام من رقم الهاتف")
+    await client.run_until_disconnected()
+
+# --- تشغيل البوت في خيط منفصل مع حلقة أحداث خاصة ---
+def run_bot_in_thread():
+    """تشغيل البوت في خيط مع حلقة أحداث خاصة"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    async def bot_main():
-        # شغّل listener البوت أولاً
-        asyncio.create_task(handle_start_command())
-
-        # استخدام الجلسة الموجودة بدون إنشاء جديدة
-        client = TelegramClient(SESSION_PATH, api_id, api_hash)
-        
-        try:
-            # محاولة بدء الجلسة الموجودة
-            await client.connect()
-            
-            if not await client.is_user_authorized():
-                logger.error("❌ الجلسة غير صالحة أو منتهية الصلاحية")
-                return
-            
-            me = await client.get_me()
-            logger.info(f"✅ تم تسجيل الدخول بنجاح كـ: {me.first_name} (ID: {me.id})")
-            
-            # الحصول على المجموعة المصدر
-            try:
-                source = await client.get_entity(SOURCE_GROUP)
-                logger.info(f"✅ تم الاتصال بالمجموعة المصدر: {SOURCE_GROUP}")
-            except Exception as e:
-                logger.error(f"❌ فشل الاتصال بالمجموعة المصدر: {e}")
-                return
-
-            @client.on(events.NewMessage(chats=source))
-            async def handler(event):
-                try:
-                    msg = event.message
-                    if not msg.message:
-                        return
-
-                    text = msg.message.strip()
-                    logger.info(f"📩 تم استلام رسالة جديدة من المجموعة")
-
-                    # --- تنظيف النص ---
-                    first_line = text.splitlines()[0].strip() if text else ""
-                    country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
-
-                    # اسم السيرفر بدون #
-                    server_name = "Unknown"
-                    if "#" in first_line:
-                        parts = first_line.split("#")
-                        if len(parts) > 1:
-                            server_parts = parts[1].split()
-                            if server_parts:
-                                server_name = server_parts[0].strip()
-
-                    # استخراج الرقم مع إمكانية التحكم بعدد الأرقام المعروضة
-                    display_number = extract_phone_number(text, DIGITS_TO_SHOW)
-
-                    # استخراج الكود
-                    code = extract_code(msg, text)
-
-                    # --- تنسيق الرسالة ---
-                    final_text = (
-                        "📩 *NEW MESSAGE*\n"
-                        "━━━━━━━━━━━━━━━━━━\n"
-                        f"🌍 *Country:* `{country_only}`\n\n"
-                        f"📱 *Number:*.... `{display_number}`\n\n"
-                        f"🔐 *Code:* `{code}`\n\n"
-                        f"🖥️ *Server:* `{server_name}`\n\n"
-                        "━━━━━━━━━━━━━━━━━━\n"
-                        "⏳ _This message will be deleted automatically after 10 minutes._"
-                    )
-
-                    logger.info(f"معالجة الرسالة: {country_only} - {display_number}")
-                    asyncio.create_task(send_and_delete(final_text))
-                    
-                except Exception as e:
-                    logger.error(f"خطأ في معالج الأحداث: {e}")
-
-            logger.info("🟢 البوت يعمل بنجاح على Render")
-            logger.info(f"📱 عرض آخر {DIGITS_TO_SHOW} أرقام من رقم الهاتف")
-            logger.info("🟢 في انتظار الرسائل...")
-            
-            await client.run_until_disconnected()
-            
-        except Exception as e:
-            logger.error(f"❌ خطأ في تشغيل البوت: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            await client.disconnect()
-    
-    loop.run_until_complete(bot_main())
-    loop.close()
-
-# --- تشغيل البوت في خيط دائم مع إعادة التشغيل التلقائي ---
-def start_bot_thread():
-    """تشغيل البوت في حلقة لا نهائية مع إعادة التشغيل عند الفشل"""
     while True:
         try:
-            logger.info("🔄 بدء تشغيل البوت...")
-            run_bot_sync()
+            loop.run_until_complete(main())
         except Exception as e:
-            logger.error(f"⚠️ حدث خطأ وسيتم إعادة التشغيل بعد 10 ثواني: {e}")
-            time.sleep(10)
+            logger.error(f"حدث خطأ في البوت: {e}")
+            time.sleep(10)  # انتظر 10 ثواني قبل إعادة التشغيل
             continue
         # إذا انتهى البوت بشكل طبيعي، انتظر قليلاً وأعد التشغيل
-        logger.info("⏹️ توقف البوت، إعادة التشغيل بعد 5 ثواني...")
+        logger.info("إعادة تشغيل البوت بعد 5 ثواني...")
         time.sleep(5)
 
-# --- نقطة الدخول الرئيسية ---
+# --- هذا الجزء مهم جداً للتعامل مع gunicorn ---
+# متغير عام لتتبع حالة البوت
+bot_thread_started = False
+
+# دالة لبدء البوت في الخلفية (تسمى مرة واحدة فقط)
+def start_bot_background():
+    global bot_thread_started
+    if not bot_thread_started:
+        bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
+        bot_thread.start()
+        bot_thread_started = True
+        logger.info("🚀 تم بدء تشغيل البوت في الخلفية")
+    else:
+        logger.info("البوت يعمل بالفعل في الخلفية")
+
+# --- نقطة الدخول الرئيسية - متوافقة مع gunicorn ---
+if __name__ != "__main__":
+    # هذا الجزء يعمل عندما يستخدم gunicorn (في Render)
+    logger.info("بدء تشغيل التطبيق مع gunicorn...")
+    start_bot_background()
+
+# --- نقطة الدخول العادية - عند التشغيل المباشر ---
 if __name__ == "__main__":
     # تشغيل Flask في خيط منفصل
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info(f"🚀 Flask server بدأ على المنفذ {PORT}")
     
-    # تشغيل البوت في الخيط الرئيسي مع إعادة التشغيل التلقائي
-    try:
-        start_bot_thread()
-    except KeyboardInterrupt:
-        logger.info("👋 تم إيقاف البوت يدوياً")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"💥 خطأ غير متوقع: {e}")
-        sys.exit(1)
+    # تشغيل البوت
+    run_bot_in_thread()
