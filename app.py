@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from telethon import TelegramClient, events
+from telethon.tl.types import MessageService
 from flask import Flask
 from threading import Thread
 
@@ -173,6 +174,18 @@ async def main():
     async def handler(event):
         try:
             msg = event.message
+            
+            # التحقق من أن الرسالة هي رسالة خدمة (إشعار نظام)
+            if isinstance(msg, MessageService):
+                # حذف رسائل الخدمة فوراً مثل "انضم" و "غادر"
+                try:
+                    await client.delete_messages(source, [msg.id])
+                
+                except Exception as e:
+                
+                return  # عدم معالجة رسائل الخدمة
+            
+            # معالجة الرسائل النصية العادية فقط
             if not msg.message:
                 return
 
@@ -190,18 +203,16 @@ async def main():
                 country_part = first_line.split("#")[1].strip()
                 country_code = country_part.split()[0].strip() if country_part else "Unknown"
             
-            # استخراج اسم السيرفر (WS, VK, etc) - المهم هنا
+            # استخراج اسم السيرفر (WS, VK, etc)
             server_name = "Unknown"
             if "#" in first_line:
                 parts = first_line.split("#")
                 if len(parts) > 1:
                     after_hash = parts[1].strip().split()
                     if len(after_hash) >= 2:
-                        server_name = after_hash[1]  # الثاني بعد # هو السيرفر
+                        server_name = after_hash[1]
                     elif len(after_hash) == 1:
-                        # إذا كان هناك جزء واحد فقط بعد #، قد يكون السيرفر مباشرة
                         potential = after_hash[0]
-                        # إذا كان مكون من حرفين فقط وليس رمز دولة
                         if len(potential) == 2 and potential not in ["YE", "BO", "US", "UK", "SA", "AE"]:
                             server_name = potential
 
@@ -224,8 +235,12 @@ async def main():
             )
 
             asyncio.create_task(send_and_delete(final_text))
-        except:
-            pass
+            
+            # (اختياري) حذف الرسالة الأصلية من المجموعة المصدر بعد معالجتها
+            # await client.delete_messages(source, [msg.id])
+            
+        except Exception as e:
+    
 
     await client.run_until_disconnected()
 
@@ -237,7 +252,8 @@ def run_bot_in_thread():
     while True:
         try:
             loop.run_until_complete(main())
-        except:
+        except Exception as e:
+            
             time.sleep(10)
             continue
         time.sleep(5)
