@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import asyncio
 import aiohttp
 import re
-import os
 from telethon import TelegramClient, events
 from flask import Flask
-import threading
+from threading import Thread
 import logging
 
-# إعداد التسجيل (logging)
+# إعداد التسجيل للأخطاء
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -33,23 +33,22 @@ TARGET_CHAT_ID = -1003757848848  # رقم القناة/الدردشة الصحي
 DIGITS_TO_SHOW = 6  
 
 # --- إعدادات Render ---
-PORT = int(os.environ.get('PORT', 8080))
-HOST = '0.0.0.0'
+PORT = int(os.environ.get('PORT', 5000))
+SESSION_NAME = "session"  # اسم ملف الجلسة الموجود (session.session)
 
-# --- إنشاء تطبيق Flask للخادم ---
+# --- إعداد Flask للتأكد أن Render يعرف أن الخدمة تعمل ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running!", 200
+    return "Bot is running!"
 
 @app.route('/health')
 def health():
-    return "Healthy", 200
+    return "OK", 200
 
 def run_flask():
-    """تشغيل خادم Flask"""
-    app.run(host=HOST, port=PORT)
+    app.run(host='0.0.0.0', port=PORT)
 
 # --- إرسال وحذف بعد 10 دقائق ---
 async def send_and_delete(text):
@@ -171,14 +170,20 @@ async def main():
     # شغّل listener البوت أولاً
     asyncio.create_task(handle_start_command())
 
-    # إنشاء مجلد session إذا لم يكن موجوداً
-    if not os.path.exists('sessions'):
-        os.makedirs('sessions')
-
-    client = TelegramClient("sessions/session", api_id, api_hash)
-    await client.start()
+    # استخدام الجلسة الموجودة بدون إنشاء جديدة
+    # Telethon سيبحث تلقائياً عن ملف session.session في نفس المجلد
+    client = TelegramClient(SESSION_NAME, api_id, api_hash)
+    
+    try:
+        # محاولة بدء الجلسة الموجودة
+        await client.start()
+        logger.info("تم استخدام الجلسة الموجودة بنجاح")
+    except Exception as e:
+        logger.error(f"فشل في استخدام الجلسة الموجودة: {e}")
+        logger.info("تأكد من وجود ملف session.session في نفس المجلد")
+        raise e
+    
     source = await client.get_entity(SOURCE_GROUP)
-    logger.info(f"Connected to source group: {SOURCE_GROUP}")
 
     @client.on(events.NewMessage(chats=source))
     async def handler(event):
@@ -217,7 +222,7 @@ async def main():
         )
 
         asyncio.create_task(send_and_delete(final_text))
-        logger.info(f"Message processed: {country_only} - {display_number}")
+        logger.info(f"تم إرسال رسالة جديدة: {country_only} - {display_number}")
 
     logger.info("🟢 Running: capture ALL messages + clean format + auto delete (10 minutes) + /start handler")
     logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
@@ -225,15 +230,15 @@ async def main():
 
 # --- Start ---
 if __name__ == "__main__":
-    # تشغيل خادم Flask في thread منفصل
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    # تشغيل Flask في خيط منفصل
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
     flask_thread.start()
-    logger.info(f"Flask server started on port {PORT}")
     
-    # تشغيل البوت
+    # تشغيل Telethon client
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("تم إيقاف البوت")
     except Exception as e:
-        logger.error(f"Error in main: {e}")
+        logger.error(f"خطأ في تشغيل البوت: {e}")
