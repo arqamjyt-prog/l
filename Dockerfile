@@ -9,8 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # نسخ الملفات
 COPY . .
 
-# التأكد من وجود ملف الجلسة
+# التأكد من وجود الجلسة
 RUN ls -la
 
-# تشغيل البوت مباشرة بدون gunicorn
+# تشغيل البوت مباشرة
 CMD ["python", "app.py"]
