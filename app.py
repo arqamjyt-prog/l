@@ -9,6 +9,8 @@ from flask import Flask
 import threading
 import os
 import logging
+import sys
+import datetime
 
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -161,21 +163,20 @@ def extract_code(msg, text):
     
     # إذا لم نجد في الأزرار، ابحث في النص
     code_patterns = [
-        r'Code:?\s*(\d+)',     # Code: 12345
-        r'كود:?\s*(\d+)',       # كود: 12345
+        r'Code:?\s*(\d+)',
+        r'كود:?\s*(\d+)',
         r'([Cc]ode)[:\s]*(\d+)',
         r'([Kk]od)[:\s]*(\d+)',
         r'is[:\s]*(\d+)',
-        r'\b(\d{4,8})\b'        # أي 4-8 أرقام منفصلة
+        r'\b(\d{4,8})\b'
     ]
     
     for pattern in code_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            # البحث عن المجموعة التي تحتوي على الأرقام
             for group in match.groups():
-                if group and group.isdigit():
-                    return group
+                if group and str(group).isdigit():
+                    return str(group)
     
     return "Unknown"
 
@@ -184,83 +185,67 @@ def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# --- دالة للتحقق من اتصال Telethon ---
-async def check_telethon_connection(client):
-    try:
-        me = await client.get_me()
-        logger.info(f"✅ Connected as: {me.username or me.first_name}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Telethon connection error: {e}")
-        return False
-
-# --- Main Telethon client ---
+# --- الدالة الرئيسية ---
 async def main():
     try:
-        # تشغيل خادم Flask في thread منفصل
-        flask_thread = threading.Thread(target=run_flask)
-        flask_thread.daemon = True
+        # تشغيل Flask في thread منفصل
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
-        logger.info("🌐 Flask server started")
+        logger.info("🌐 Flask server started on port " + os.environ.get("PORT", "5000"))
         
-        # شغّل listener البوت أولاً
+        # تشغيل معالج أوامر البوت
         asyncio.create_task(handle_start_command())
-
-        # إنشاء جلسة Telethon جديدة
+        
+        # إنشاء جلسة Telethon
         client = TelegramClient("session", api_id, api_hash)
         await client.start()
         
         # التحقق من الاتصال
-        if not await check_telethon_connection(client):
-            logger.error("Failed to connect to Telethon")
-            return
+        me = await client.get_me()
+        logger.info(f"✅ Bot connected as: {me.username or me.first_name}")
         
-        # الحصول على المصدر
+        # الاتصال بالمصدر
         try:
             source = await client.get_entity(SOURCE_GROUP)
-            logger.info(f"✅ Connected to source: {source.title if hasattr(source, 'title') else SOURCE_GROUP}")
+            logger.info(f"✅ Connected to source group: {SOURCE_GROUP}")
         except Exception as e:
-            logger.error(f"❌ Failed to get source group: {e}")
-            logger.info("Trying to get entity by ID...")
-            # محاولة الحصول على المجموعة بطرق أخرى
+            logger.error(f"❌ Failed to connect to source: {e}")
+            logger.info("Trying to join group first...")
             try:
-                if SOURCE_GROUP.startswith("https://t.me/+"):
-                    # محاولة الانضمام أولاً
-                    await client.join_chat(SOURCE_GROUP)
-                    source = await client.get_entity(SOURCE_GROUP)
-                else:
-                    source = await client.get_entity(SOURCE_GROUP)
+                await client.join_chat(SOURCE_GROUP)
+                source = await client.get_entity(SOURCE_GROUP)
+                logger.info(f"✅ Joined and connected to source group")
             except Exception as e2:
-                logger.error(f"❌ Failed again: {e2}")
+                logger.error(f"❌ Failed to join group: {e2}")
                 return
-
+        
         @client.on(events.NewMessage(chats=source))
         async def handler(event):
             try:
                 msg = event.message
                 if not msg.message:
                     return
-
+                
                 text = msg.message.strip()
-                logger.info(f"📩 New message received: {text[:50]}...")
-
-                # --- تنظيف النص ---
+                logger.info(f"📩 New message received: {text[:100]}...")
+                
+                # تنظيف النص
                 first_line = text.splitlines()[0].strip() if text else ""
                 country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
-
-                # اسم السيرفر بدون #
+                
+                # اسم السيرفر
                 server_name = "Unknown"
                 if "#" in first_line:
                     parts = first_line.split("#")[1].split()
                     server_name = parts[0].strip() if parts else "Unknown"
-
+                
                 # استخراج الرقم
                 display_number = extract_phone_number(text, DIGITS_TO_SHOW)
-
+                
                 # استخراج الكود
                 code = extract_code(msg, text)
-
-                # --- تنسيق الرسالة ---
+                
+                # تنسيق الرسالة
                 final_text = (
                     "📩 *NEW MESSAGE*\n"
                     "━━━━━━━━━━━━━━━━━━\n"
@@ -271,29 +256,27 @@ async def main():
                     "━━━━━━━━━━━━━━━━━━\n"
                     "⏳ _This message will be deleted automatically after 10 minutes._"
                 )
-
-                logger.info(f"Formatted message: {final_text[:100]}...")
+                
+                logger.info(f"Formatted message prepared")
                 
                 # تحديث وقت آخر رسالة
-                import datetime
                 home.last_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
+                # إرسال الرسالة
                 asyncio.create_task(send_and_delete(final_text))
                 
             except Exception as e:
                 logger.error(f"Error in message handler: {e}")
-
-        logger.info("🟢 Running as SERVER: capture ALL messages + clean format + auto delete")
-        logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
-        logger.info("👂 Listening for messages...")
         
+        logger.info("🟢 Bot is now listening for messages...")
+        logger.info(f"📱 Showing last {DIGITS_TO_SHOW} digits of phone number")
         await client.run_until_disconnected()
         
     except Exception as e:
         logger.error(f"❌ Main error: {e}")
-        raise
+        sys.exit(1)
 
-# --- Start ---
+# --- نقطة الدخول الرئيسية ---
 if __name__ == "__main__":
     try:
         asyncio.run(main())
@@ -301,3 +284,4 @@ if __name__ == "__main__":
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        sys.exit(1)
