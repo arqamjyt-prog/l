@@ -23,17 +23,16 @@ GET_UPDATES_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
 
 # --- Groups ---
 SOURCE_GROUP = "https://t.me/+PThwytZf7Ec5Mjg0"
-TARGET_CHAT_ID = -1003757848848  # رقم القناة/الدردشة الصحيحة
+TARGET_CHAT_ID = -1003757848848
 
 # --- إعدادات عرض الرقم ---
-# غير هذا الرقم: 1,2,3,4,5,6,7,8,9,10 أو 0 للرقم كاملاً
 DIGITS_TO_SHOW = 6  
 
 # --- إعدادات Render ---
 PORT = int(os.environ.get('PORT', 5000))
-SESSION_NAME = "session"  # اسم ملف الجلسة الموجود (session.session)
+SESSION_NAME = "session"
 
-# --- إعداد Flask للتأكد أن Render يعرف أن الخدمة تعمل ---
+# --- إعداد Flask ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -63,7 +62,7 @@ async def send_and_delete(text):
                 return
             message_id = data["result"]["message_id"]
 
-    await asyncio.sleep(600)  # 10 دقائق
+    await asyncio.sleep(600)
 
     async with aiohttp.ClientSession() as session:
         await session.post(
@@ -102,18 +101,13 @@ async def handle_start_command():
             except:
                 await asyncio.sleep(1)
 
-# --- دالة استخراج الرقم مع خيارات عرض مرنة ---
+# --- دالة استخراج الرقم ---
 def extract_phone_number(text, digits_to_show=6):
-    """
-    استخراج رقم الهاتف وعرض آخر digits_to_Show أرقام
-    digits_to_show: 1-10 أو 0 لعرض الرقم كاملاً
-    """
-    # أنماط مختلفة للأرقام
     patterns = [
-        r'[\+\d]+\d{8,}',  # أرقام بطول 8+ (مع +)
-        r'\d{8,}',          # أرقام بطول 8+ (بدون +)
-        r'X\d{5,}',         # نمط X متبوعاً بأرقام
-        r'\d{5,}'           # أي 5 أرقام أو أكثر
+        r'[\+\d]+\d{8,}',
+        r'\d{8,}',
+        r'X\d{5,}',
+        r'\d{5,}'
     ]
     
     full_number = "Unknown"
@@ -127,31 +121,27 @@ def extract_phone_number(text, digits_to_show=6):
     if full_number == "Unknown":
         return "Unknown"
     
-    # إذا digits_to_show = 0، اعرض الرقم كاملاً
     if digits_to_show == 0:
         return full_number
     
-    # عرض آخر digits_to_Show أرقام
     if len(full_number) > digits_to_show:
         return "..." + full_number[-digits_to_show:]
     else:
         return full_number
 
-# --- دالة استخراج الكود من الأزرار أو النص ---
+# --- دالة استخراج الكود ---
 def extract_code(msg, text):
     try:
-        # البحث في الأزرار أولاً
         if msg.reply_markup:
             for row in msg.reply_markup.rows:
                 for b in row.buttons:
                     if hasattr(b, "text") and b.text.strip().isdigit():
                         return b.text.strip()
         
-        # إذا لم نجد في الأزرار، ابحث في النص
         code_patterns = [
-            r'Code:?\s*(\d+)',     # Code: 12345
-            r'كود:?\s*(\d+)',       # كود: 12345
-            r'\b(\d{4,6})\b'        # أي 4-6 أرقام منفصلة
+            r'Code:?\s*(\d+)',
+            r'كود:?\s*(\d+)',
+            r'\b(\d{4,6})\b'
         ]
         
         for pattern in code_patterns:
@@ -165,10 +155,8 @@ def extract_code(msg, text):
 
 # --- Main Telethon client ---
 async def main():
-    # شغّل listener البوت أولاً
     asyncio.create_task(handle_start_command())
 
-    # استخدام الجلسة الموجودة بدون إنشاء جديدة
     client = TelegramClient(SESSION_NAME, api_id, api_hash)
     
     try:
@@ -190,14 +178,32 @@ async def main():
 
             text = msg.message.strip()
 
-            # --- تنظيف النص تماماً كما كان في الكود الأصلي ---
+            # --- استخراج البيانات بالطريقة الصحيحة ---
             first_line = text.splitlines()[0].strip() if text else ""
-            country_only = first_line.split("#")[0].strip() if first_line else "Unknown"
-
-            # اسم السيرفر بدون # - بالضبط كما كان في الكود الأصلي
+            
+            # استخراج العلم ورمز الدولة من أول السطر (مثال: "🇾🇪 #YE")
+            country_with_flag = first_line.split()[0].strip() if first_line else "Unknown"
+            
+            # استخراج رمز الدولة (YE, BO, etc)
+            country_code = "Unknown"
+            if "#" in first_line:
+                country_part = first_line.split("#")[1].strip()
+                country_code = country_part.split()[0].strip() if country_part else "Unknown"
+            
+            # استخراج اسم السيرفر (WS, VK, etc) - المهم هنا
             server_name = "Unknown"
             if "#" in first_line:
-                server_name = first_line.split("#")[1].split()[0].strip()
+                parts = first_line.split("#")
+                if len(parts) > 1:
+                    after_hash = parts[1].strip().split()
+                    if len(after_hash) >= 2:
+                        server_name = after_hash[1]  # الثاني بعد # هو السيرفر
+                    elif len(after_hash) == 1:
+                        # إذا كان هناك جزء واحد فقط بعد #، قد يكون السيرفر مباشرة
+                        potential = after_hash[0]
+                        # إذا كان مكون من حرفين فقط وليس رمز دولة
+                        if len(potential) == 2 and potential not in ["YE", "BO", "US", "UK", "SA", "AE"]:
+                            server_name = potential
 
             # استخراج الرقم
             display_number = extract_phone_number(text, DIGITS_TO_SHOW)
@@ -205,11 +211,11 @@ async def main():
             # استخراج الكود
             code = extract_code(msg, text)
 
-            # --- تنسيق الرسالة تماماً كما كان ---
+            # --- تنسيق الرسالة بالشكل المطلوب ---
             final_text = (
                 "📩 *NEW MESSAGE*\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                f"🌍 *Country:* `{country_only}`\n\n"
+                f"{country_with_flag} *Country:* `{country_code}`\n\n"
                 f"📱 *Number:*.... `{display_number}`\n\n"
                 f"🔐 *Code:* `{code}`\n\n"
                 f"🖥️ *Server:* `{server_name}`\n\n"
@@ -219,11 +225,11 @@ async def main():
 
             asyncio.create_task(send_and_delete(final_text))
         except:
-            pass  # تجاهل الأخطاء بصمت
+            pass
 
     await client.run_until_disconnected()
 
-# --- دالة لتشغيل البوت في خيط منفصل (لحل مشكلة gunicorn فقط) ---
+# --- دالة لتشغيل البوت في خيط منفصل ---
 def run_bot_in_thread():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -239,19 +245,16 @@ def run_bot_in_thread():
 # --- متغير لتتبع حالة البوت ---
 bot_started = False
 
-# --- نقطة الدخول الرئيسية - متوافقة مع gunicorn (الإضافة الوحيدة لحل المشكلة) ---
+# --- نقطة الدخول الرئيسية - متوافقة مع gunicorn ---
 if __name__ != "__main__":
     if not bot_started:
         bot_thread = Thread(target=run_bot_in_thread, daemon=True)
         bot_thread.start()
         bot_started = True
 
-# --- Start (نفس الكود الأصلي تماماً) ---
+# --- Start ---
 if __name__ == "__main__":
-    # تشغيل Flask في خيط منفصل
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-    
-    # تشغيل البوت
     run_bot_in_thread()
