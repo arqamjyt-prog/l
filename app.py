@@ -101,29 +101,38 @@ async def handle_start_command():
             except:
                 await asyncio.sleep(1)
 
-# --- دالة استخراج الرقم ---
+# --- دالة استخراج الرقم المحسنة ---
 def extract_phone_number(text, digits_to_show=6):
+    # البحث عن أنماط الأرقام المختلفة
     patterns = [
-        r'[\+\d]+\d{8,}',
-        r'\d{8,}',
-        r'X\d{5,}',
-        r'\d{5,}'
+        r'[\+\d]+\d{4,}',  # أرقام تبدأ بـ + أو أرقام
+        r'\d{4,}',          # أرقام متتالية من 4 أرقام فأكثر
+        r'X\d{4,}',         # أرقام تبدأ بـ X
+        r'\b\d{1,10}\b'     # أي رقم من 1 إلى 10 أرقام
     ]
     
     full_number = "Unknown"
     
+    # محاولة العثور على رقم
     for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            full_number = match.group()
+        matches = re.findall(pattern, text)
+        if matches:
+            # اختيار أطول رقم (غالباً هو الرقم الكامل)
+            full_number = max(matches, key=len)
             break
     
+    # إذا لم يتم العثور على رقم
     if full_number == "Unknown":
         return "Unknown"
     
-    if digits_to_show == 0:
-        return full_number
+    # إزالة أي رموز غير مرغوب فيها
+    full_number = re.sub(r'[^\dX\+]', '', full_number)
     
+    # إذا كان الرقم فارغاً بعد التنظيف
+    if not full_number:
+        return "Unknown"
+    
+    # عرض الرقم حسب الطول المطلوب
     if len(full_number) > digits_to_show:
         return "..." + full_number[-digits_to_show:]
     else:
